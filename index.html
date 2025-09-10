@@ -19,7 +19,7 @@
     .stat-label{color:var(--weak);font-size:11px;text-transform:uppercase}
     .stat-value{font-weight:700;font-size:18px;letter-spacing:-.02em}
     .stat-value.grade-S{color:var(--glow)} .stat-value.grade-A{color:var(--teal)}
-    .stat-value.grade-B{color:var(--ink)} .stat-value.grade-C{color:var(--weak)}
+    .stat-value.grade-B{color:var(--ink)}  .stat-value.grade-C{color:var(--weak)}
     .fail-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:none;align-items:center;justify-content:center;text-align:center;z-index:100}
     .fail-box{background:var(--bg);padding:30px;border-radius:20px;border:1px solid var(--line)}
     .fail-box h2{margin:0 0 10px;color:var(--teal)}
@@ -70,12 +70,12 @@
 
 <script>
 /* ========= Core Tunables ========= */
-const BPM = 120;               // you can swap later; rendering is driven by this
+const BPM = 120;                    // render tempo (can swap later)
 const beatSec = 60 / BPM;
-const pxPerMs = 0.22;          // scroll speed (higher = faster)
-const runnerX = 180;           // x position of the runner on screen
-const lanesY  = [220, 280, 340]; // y for 3 lanes (top/mid/bot)
-const PERFECT = 0.05, GREAT = 0.10, GOOD = 0.15;
+const pxPerMs = 0.22;               // scroll speed (ms -> px)
+const runnerX = 180;                // runner X position
+const lanesY  = [220, 280, 340];    // top/mid/bot Y positions
+let   PERFECT = 0.05, GREAT = 0.10, GOOD = 0.15; // seconds (tweak while testing)
 
 /* ========= DOM ========= */
 const c = document.getElementById('c'), ctx = c.getContext('2d');
@@ -94,24 +94,22 @@ const statGrade = document.getElementById('statGrade');
 /* ========= Audio ========= */
 let ac=null;
 function ensureAudio(){ if(!ac) ac=new (window.AudioContext||window.webkitAudioContext)(); }
-function blip(f=880, a=0.005, d=0.12, type='sine'){
-  if(!ac) return; const t=ac.currentTime;
-  const o=ac.createOscillator(), g=ac.createGain();
+function blip(f=880,a=0.005,d=0.12,type='sine'){
+  if(!ac) return; const t=ac.currentTime; const o=ac.createOscillator(), g=ac.createGain();
   o.type=type; o.frequency.value=f; o.connect(g); g.connect(ac.destination);
   g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.4,t+a);
   g.gain.exponentialRampToValueAtTime(0.001,t+a+d); o.start(t); o.stop(t+a+d);
 }
-const SFX = { jump:()=>blip(220,0.005,0.10,'sine'),
-              perfect:()=>blip(1100,0.004,0.15,'triangle'),
-              great:()=>blip(880,0.004,0.15,'triangle'),
-              good:()=>blip(660,0.004,0.12,'triangle'),
-              miss:()=>{ if(!ac) return; const t=ac.currentTime;
-                const b=ac.createBuffer(1, ac.sampleRate*0.18, ac.sampleRate);
-                const d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
-                const s=ac.createBufferSource(); s.buffer=b; const g=ac.createGain();
-                g.gain.setValueAtTime(0.3,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.18);
-                s.connect(g).connect(ac.destination); s.start(t);
-              }};
+const SFX={ jump:()=>blip(220,0.005,0.10,'sine'),
+            perfect:()=>blip(1100,0.004,0.15,'triangle'),
+            great:()=>blip(880,0.004,0.15,'triangle'),
+            good:()=>blip(660,0.004,0.12,'triangle'),
+            miss:()=>{ if(!ac) return; const t=ac.currentTime;
+              const b=ac.createBuffer(1, ac.sampleRate*0.18, ac.sampleRate);
+              const d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+              const s=ac.createBufferSource(); s.buffer=b; const g=ac.createGain();
+              g.gain.setValueAtTime(0.3,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.18);
+              s.connect(g).connect(ac.destination); s.start(t); } };
 
 /* ========= Metronome (single block) ========= */
 let metCtx=null, metGain=null;
@@ -121,11 +119,11 @@ function ensureMet(){ if(metCtx) return;
 }
 function scheduleMet(){
   ensureMet();
-  const beats = 4*32;                   // schedule ~32 bars
+  const beats = 4*32;                // schedule ~32 bars
   const base  = metCtx.currentTime + 0.05;
   for(let i=0;i<beats;i++){
     const osc=metCtx.createOscillator(), env=metCtx.createGain();
-    osc.frequency.value = i%4===0 ? 1000 : 800; // stronger on downbeat
+    osc.frequency.value = (i%4===0)?1000:800;
     osc.connect(env); env.connect(metGain);
     const t = base + i*beatSec;
     env.gain.setValueAtTime(0, t);
@@ -136,7 +134,7 @@ function scheduleMet(){
   metGain.gain.value = chkMet.checked ? 0.25 : 0.0;
 }
 
-/* ========= Chart (toy string -> actions) ========= */
+/* ========= Chart (string -> actions) ========= */
 const CHART = "1---2---1---3---1-2-1---S--|1---2---1---3---1-2-1---4---|1---2---1---3---1-2-1---S--|1---2---1---3---1-2-1---4---";
 let actions=[], hazards=[];
 function buildChart(){
@@ -146,13 +144,14 @@ function buildChart(){
     const t = beat * beatSec * 1000;
     if("123".includes(ch)){ const lane = parseInt(ch)-1;
       actions.push({time:t, lane, type:'JUMP', hit:false});
-      hazards.push({time:t, lane});
-    } else if(ch==='4'){ const lane=1; // mirror moment
+      hazards.push({time:t, lane, cleared:false});         // <-- clearable
+    } else if(ch==='4'){ const lane=1; // mirror moment (rendered as hazard too)
       actions.push({time:t, lane, type:'MIRROR', hit:false});
-    } else if(ch==='S'){ // shadow gate triplet
+      hazards.push({time:t, lane, cleared:false});
+    } else if(ch==='S'){ // shadow triplet
       [0,1,2].forEach(l=>actions.push({time:t, lane:l, type:'SHADOW', hit:false}));
     }
-    beat += (ch==='|'?0:0.5); // bar marker has no time, dash=half beat
+    beat += (ch==='|'?0:0.5);
   }
 }
 buildChart();
@@ -161,6 +160,7 @@ buildChart();
 let running=false, startMs=0, elapsed=0, y=0, vy=0, score=0, combo=0, grade='C';
 let perfects=0, greats=0, goods=0, misses=0, fracture=0, glow=0;
 let offsetMs = 0;
+let lastHitTime = -1;                // used for grace window
 
 /* ========= Loop ========= */
 function loop(){ if(!running) return;
@@ -168,20 +168,22 @@ function loop(){ if(!running) return;
   update(); draw(); requestAnimationFrame(loop);
 }
 function update(){
-  vy += 0.6; y = Math.min(0, y+vy);      // clamp runner (simple "ground")
+  vy += 0.6; y = Math.min(0, y+vy);     // clamp to ground
   fracture *= 0.9; glow *= 0.9;
-  // auto-miss check
+
+  // auto-miss scan
   for(const a of actions){
     if(!a.hit && elapsed > a.time + GOOD*1000){
       a.hit='miss'; misses++; combo=0; fracture=1; SFX.miss();
     }
   }
-  // HUD
+
   const b = elapsed/1000/beatSec;
   const bar = Math.floor(b/4)+1, beat = Math.floor(b%4)+1;
   statTime.textContent = (elapsed/1000).toFixed(1)+'s';
   statBeat.textContent = `Bar ${bar} • Beat ${beat}`;
   statScore.textContent= score; statCombo.textContent= combo;
+
   const total = perfects+greats+goods+misses;
   if(total>0){
     const p = (perfects*3 + greats*2 + goods) / (total*3);
@@ -191,19 +193,16 @@ function update(){
   statGrade.className = 'stat-value grade-'+grade;
 }
 function draw(){
-  // size
   const w = Math.min(1200, window.innerWidth-28); if(c.width!==w) c.width=w;
   c.height=420; ctx.clearRect(0,0,c.width,c.height);
   drawBG(); drawLanes(); drawHazards(); drawRunner(); drawFX();
 }
 function drawBG(){
   const g = ctx.createLinearGradient(0,0,0,c.height);
-  g.addColorStop(0,'#0B0F12'); g.addColorStop(1,'#0E151A'); ctx.fillStyle=g;
-  ctx.fillRect(0,0,c.width,c.height);
+  g.addColorStop(0,'#0B0F12'); g.addColorStop(1,'#0E151A');
+  ctx.fillStyle=g; ctx.fillRect(0,0,c.width,c.height);
 }
-function drawLanes(){
-  ctx.fillStyle='#122027'; lanesY.forEach(y=> ctx.fillRect(0,y,c.width,3));
-}
+function drawLanes(){ ctx.fillStyle='#122027'; lanesY.forEach(y=> ctx.fillRect(0,y,c.width,3)); }
 function drawRunner(){
   ctx.save(); ctx.translate(runnerX, lanesY[1] + y);
   if(glow>0.01){ ctx.shadowColor='rgba(127,231,224,.8)'; ctx.shadowBlur=18*glow; }
@@ -214,49 +213,73 @@ function drawHazards(){
   ctx.fillStyle='#9dd6ff';
   const now=elapsed;
   for(const h of hazards){
-    const dt = h.time-now;          // ms until hazard reaches runnerX
-    const x  = runnerX + dt*pxPerMs; // map time→x
+    if(h.cleared) continue;                            // <-- skip cleared
+    const dt = h.time - now;
+    const x  = runnerX + dt*pxPerMs;
     if(x<-30 || x>c.width+30) continue;
     const y  = lanesY[h.lane];
     ctx.fillRect(x-10,y-10,20,20);
-    // collision
-    if(Math.abs(x-runnerX)<18 && Math.abs((y)-(lanesY[1]+0))<18){
+
+    // 150 ms grace after a hit to avoid same-frame collision
+    const grace = (lastHitTime >= 0) && (now - lastHitTime <= 150);
+    if(!grace && Math.abs(x-runnerX)<18 && Math.abs(y - lanesY[1])<18){
       running=false; fail.style.display='flex';
     }
   }
 }
 function drawFX(){
   // grain
-  ctx.globalAlpha=0.06; for(let i=0;i<200;i++){ ctx.fillStyle='rgba(255,255,255,.6)';
-    ctx.fillRect(Math.random()*c.width,Math.random()*c.height,1,1);}
+  ctx.globalAlpha=0.06;
+  for(let i=0;i<200;i++){
+    ctx.fillStyle='rgba(255,255,255,.6)';
+    ctx.fillRect(Math.random()*c.width,Math.random()*c.height,1,1);
+  }
   ctx.globalAlpha=1;
   // vignette
   const vg=ctx.createRadialGradient(c.width/2,c.height/2, c.height*.35, c.width/2,c.height/2, c.height*.85);
-  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.35)'); ctx.fillStyle=vg;
-  ctx.fillRect(0,0,c.width,c.height);
-  // fracture shake
-  if(fracture>0.05){ ctx.save(); ctx.translate((Math.random()-0.5)*10*fracture,(Math.random()-0.5)*10*fracture); ctx.restore(); }
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.35)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,c.width,c.height);
+  // fracture shake (subtle, handled in update visuals)
 }
 
-/* ========= Input / Judgement ========= */
-function soonest(){ return actions.filter(a=>!a.hit).sort((a,b)=>a.time-b.time)[0]; }
+/* ========= Judging ========= */
+function soonestMid(){ // runner is on middle lane (index 1)
+  return actions.filter(a=>!a.hit && a.lane===1).sort((x,y)=>x.time-y.time)[0];
+}
+function hitNote(a, tier, base){
+  a.hit = true;
+  if(tier==='perfect'){ perfects++; glow=1;   SFX.perfect(); }
+  else if(tier==='great'){ greats++; glow=0.6; SFX.great(); }
+  else { goods++; glow=0.3; SFX.good(); }
+
+  combo++; score += base + combo;
+  clearHazard(a);              // <-- remove matching hazard
+  lastHitTime = elapsed;       // <-- grace window anchor
+  update();                    // refresh HUD quickly
+}
 function judge(){
-  const a = soonest(); if(!a) return;
-  const d = Math.abs(a.time - elapsed)/1000; // seconds
-  if(d<=PERFECT){ a.hit=true; perfects++; combo++; score+=300+combo; glow=1; SFX.perfect(); }
-  else if(d<=GREAT){ a.hit=true; greats++; combo++; score+=200+combo; glow=0.6; SFX.great(); }
-  else if(d<=GOOD){ a.hit=true; goods++; score+=100; glow=0.3; SFX.good(); }
-  else { /* let miss detector handle */ }
+  const a = soonestMid(); if(!a) return;
+  const d = Math.abs(a.time - elapsed)/1000;
+  if(d<=PERFECT) hitNote(a,'perfect',300);
+  else if(d<=GREAT) hitNote(a,'great',200);
+  else if(d<=GOOD) hitNote(a,'good',100);
+  // else: miss scanner will mark it
+}
+function clearHazard(a){
+  const tol = beatSec*1000*0.25; // 1/4 beat tolerance
+  const h = hazards.find(h=>!h.cleared && h.lane===a.lane && Math.abs(h.time-a.time)<tol);
+  if(h) h.cleared = true;
 }
 
 /* ========= Controls ========= */
 btnStart.onclick = ()=>{ if(running) return; ensureAudio();
   if(chkMet.checked) scheduleMet();
-  running=true; startMs=performance.now(); fracture=0; glow=0; loop();
+  running=true; fail.style.display='none'; startMs=performance.now(); fracture=0; glow=0; loop();
 };
 btnPause.onclick = ()=>{ running=false; };
 btnRestart.onclick = ()=>{ running=false; fail.style.display='none';
-  score=combo=perfects=greats=goods=misses=0; actions.forEach(a=>a.hit=false); elapsed=0; startMs=performance.now(); draw();
+  score=combo=perfects=greats=goods=misses=0; actions.forEach(a=>a.hit=false);
+  buildChart(); elapsed=0; startMs=performance.now(); draw();
 };
 btnRetry.onclick = ()=>{ fail.style.display='none'; btnRestart.onclick(); btnStart.onclick(); };
 window.addEventListener('keydown',e=>{ if(!running) return;
@@ -272,35 +295,33 @@ const calBar = document.querySelector('.cal-bar-container');
 const calHit = document.getElementById('calHit');
 const calResult = document.getElementById('calResult');
 let calOn=false, calPulse=false, taps=[];
-btnCalibrate.onclick = ()=>{ ensureAudio(); overlay.style.display='flex'; };
-btnStartCal.onclick = ()=>{ calOn=true; taps.length=0; btnStartCal.style.display='none'; calBar.style.display='block'; calResult.textContent='Tap with the pulse (5×)…'; requestAnimationFrame(calLoop); };
+document.getElementById('btnCalibrate').onclick = ()=>{ ensureAudio(); overlay.style.display='flex'; };
+btnStartCal.onclick = ()=>{ calOn=true; taps.length=0; btnStartCal.style.display='none'; calBar.style.display='block';
+  calResult.textContent='Tap with the pulse (5×)…'; requestAnimationFrame(calLoop); };
 btnCloseCal.onclick = ()=>{ overlay.style.display='none'; btnStartCal.style.display='inline-block'; btnCloseCal.style.display='none'; calBar.style.display='none'; calResult.textContent=''; };
-function calLoop(){
-  if(!calOn) return;
+function calLoop(){ if(!calOn) return;
   const now=performance.now()/1000, cyc = now%1; calHit.style.left = (cyc*100)+'%';
   if(cyc<0.05 && !calPulse){ blip(1000,0.004,0.08,'sine'); calPulse=true; }
-  if(cyc>0.05) calPulse=false;
-  requestAnimationFrame(calLoop);
+  if(cyc>0.05) calPulse=false; requestAnimationFrame(calLoop);
 }
-function takeCalTap(){
+function recordTap(){
   if(!calOn) return;
   const cyc = (performance.now()/1000)%1;
   const offset = (cyc>0.5 ? cyc-1 : cyc)*1000; // ms around 0
   taps.push(offset); calResult.textContent=`Hit ${taps.length}/5 (${offset.toFixed(0)}ms)`;
   if(taps.length>=5){ calOn=false;
     const avg = Math.round(taps.reduce((a,b)=>a+b,0)/taps.length);
-    offsetMs = -avg; // inverse
+    offsetMs = -avg; // apply inverse
     calResult.textContent = `Done. Applied ${(-avg)}ms offset.`;
     btnCloseCal.style.display='inline-block';
   }
 }
-window.addEventListener('keydown',e=>{ if(calOn) takeCalTap(); });
-window.addEventListener('mousedown',()=>{ if(calOn) takeCalTap(); });
+window.addEventListener('keydown',e=>{ if(calOn) recordTap(); });
+window.addEventListener('mousedown',()=>{ if(calOn) recordTap(); });
 
 /* ========= Boot ========= */
-function resetEngine(){ buildChart(); draw(); }
 window.addEventListener('resize',draw);
-resetEngine();
+buildChart(); draw();
 </script>
 </body>
 </html>
